@@ -1,5 +1,17 @@
 # eakazi_jobs-backend
 
+If you want to start working on your project locally, you might want to try the following commands:
+
+```bash
+# 1. Clone this repository
+# 2. Install dependencies
+npm install
+# 3. Start the replica, running in the background
+dfx start --background
+# 4. Deploy your canisters to the replica and generate your candid interface
+dfx deploy
+```
+
 Welcome to your new ea project and to the internet computer development community. By default, creating a new project adds this README and some template files to your project directory. You can edit these template files to customize your project and to include your own code to speed up the development cycle.
 
 To get started, you might want to explore the project directory structure and the default configuration file. Working with this project in your development environment will not affect any production deployment or identity tokens.
