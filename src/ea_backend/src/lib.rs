@@ -1,5 +1,7 @@
-use candid::{CandidType, Principal};
-use ic_cdk::api::call::ManualReply;
+pub mod certificate;
+
+use candid::{CandidType,Principal};
+use ic_cdk::{api::call::ManualRepl};
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk_macros::*;
 use serde::{Deserialize, Serialize};
