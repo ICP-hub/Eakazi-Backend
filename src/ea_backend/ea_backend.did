@@ -51,4 +51,7 @@ service : {
   checkAppliedCourse : (text) -> (bool) query;
   getJobsAppliedCount : () -> (nat32) query;
   getCoursesRegisteredByUser : () -> (vec Course);
+  getCourseApplicants :(text) -> (vec Profile) query;
+  getJobApplicants :(text) -> (vec Profile) query;
+  getAllFreelancers : () -> (vec Profile) query;
 };

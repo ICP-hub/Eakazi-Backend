@@ -1,7 +1,7 @@
 pub mod certificate;
 
 use candid::{CandidType,Principal};
-use ic_cdk::{api::call::ManualRepl};
+use ic_cdk::{api::call::ManualReply};
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk_macros::*;
 use serde::{Deserialize, Serialize};
@@ -543,6 +543,67 @@ fn getCoursesRegisteredByUser() -> Vec<Course> {
     registered_courses.reverse();
 
     registered_courses
+}
+
+// Getting course registered students
+#[query]
+fn getCourseApplicants(course_id: String) -> Vec<Profile> {
+    let mut applicants = Vec::new();
+    COURSE_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        if let Some(course) = store_borrowed.get(&course_id) {
+            for applicant in &course.applicants {
+                if let Some(profile) = PROFILE_STORE.with(|profile_store| {
+                    profile_store.borrow().get(applicant).cloned()
+                }) {
+                    applicants.push(profile);
+                }
+            }
+        }
+    });
+
+    applicants
+}
+
+// Getting job applicants
+#[query]
+fn getJobApplicants(job_id: String) -> Vec<Profile> {
+    let mut applicants = Vec::new();
+    JOB_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        if let Some(job) = store_borrowed.get(&job_id) {
+            for applicant in &job.applicants {
+                if let Some(profile) = PROFILE_STORE.with(|profile_store| {
+                    profile_store.borrow().get(applicant).cloned()
+                }) {
+                    applicants.push(profile);
+                }
+            }
+        }
+    });
+
+    applicants
+}
+
+// Getting all freelancers
+#[query]
+fn getAllFreelancers() -> Vec<Profile> {
+    let mut freelancers = Vec::new();
+    let principal_id = ic_cdk::api::caller();
+    let mut m: Profile = Default::default();
+    PROFILE_STORE.with(|el| m = el.borrow().get(&principal_id).unwrap().clone());
+    assert!(m.role == Roles::EMPLOYER);
+
+    PROFILE_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        for profile in store_borrowed.values() {
+            if profile.role == Roles::ADMIN {
+                freelancers.push(profile.clone());
+            }
+        }
+    });
+
+    freelancers
 }
 
 // Role enum
