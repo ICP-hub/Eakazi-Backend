@@ -1,17 +1,36 @@
 pub mod certificate;
 
-use candid::{CandidType,Principal};
-use ic_cdk::{api::call::ManualReply};
+use candid::{candid_method, CandidType, Nat, Principal};
+use certificate::{
+    get_token_metadata, owner_token_metadata, types::{GenericValue, NftError, TokenIdentifier, TokenMetadata}
+};
+use ic_cdk::api::call::ManualReply;
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk_macros::*;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::{borrow::{Borrow, BorrowMut}, cell::RefCell, sync::atomic::{AtomicU64, Ordering}};
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::certificate::mint;
+use sha2::{Digest, Sha256};
+
 type IdStore = BTreeMap<String, Principal>;
 type ProfileStore = BTreeMap<Principal, Profile>;
 type CourseStore = BTreeMap<String, Course>;
 type JobStore = BTreeMap<String, Jobs>;
-use sha2::{Digest, Sha256};
+
+
+thread_local! {
+    static CHECK_USER_STORE: RefCell<Vec<CheckUser>> = RefCell::default();
+    static PROFILE_STORE: RefCell<ProfileStore> = RefCell::default();
+    static ID_STORE: RefCell<IdStore> = RefCell::default();
+    static COURSE_STORE : RefCell<CourseStore> = RefCell::default();
+    static JOB_STORE : RefCell<JobStore> = RefCell::default();
+}
+
+// ==================================================================================================
+// Stable Storage
+// ==================================================================================================
 
 //  Making the stable storage upgradeable
 #[pre_upgrade]
@@ -78,11 +97,14 @@ fn post_upgrade() {
     JOB_STORE.with(|store| *store.borrow_mut() = job_store);
 }
 
-// Struct of the data to be stored in the stable memory
+// ==================================================================================================
+// Structs
+// ==================================================================================================
 
-#[derive(Clone, Debug, Default, CandidType, Serialize, Deserialize)]
+#[derive(Clone, Debug, CandidType, Serialize, Deserialize)]
 struct Profile {
     pub id: String,
+    pub principal_id: Principal,
     pub fullname: String,
     pub email: String,
     pub occupation: String,
@@ -93,6 +115,27 @@ struct Profile {
     pub description: String,
     pub keywords: Vec<String>,
     pub skills: Vec<String>,
+    pub token_ids: Vec<Nat>,
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            principal_id: ic_cdk::api::caller(),
+            fullname: Default::default(),
+            email: Default::default(),
+            occupation: Default::default(),
+            organization: Default::default(),
+            location: Default::default(),
+            resume: Default::default(),
+            role: Roles::ADMIN,
+            description: Default::default(),
+            keywords: Default::default(),
+            skills: Default::default(),
+            token_ids: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, CandidType, Serialize, Deserialize)]
@@ -147,13 +190,29 @@ impl Default for CheckUser {
     }
 }
 
-thread_local! {
-    static CHECK_USER_STORE: RefCell<Vec<CheckUser>> = RefCell::default();
-    static PROFILE_STORE: RefCell<ProfileStore> = RefCell::default();
-    static ID_STORE: RefCell<IdStore> = RefCell::default();
-    static COURSE_STORE : RefCell<CourseStore> = RefCell::default();
-    static JOB_STORE : RefCell<JobStore> = RefCell::default();
+// Role enum
+#[derive(CandidType, Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub enum Roles {
+    FREELANCER,
+    #[default]
+    EMPLOYER,
+    TRAINER,
+    ADMIN,
 }
+impl Roles {
+    pub fn from_str(el: &str) -> Roles {
+        match el.to_lowercase().as_str() {
+            "trainee" => Roles::FREELANCER,
+            "employer" => Roles::EMPLOYER,
+            "trainer" => Roles::TRAINER,
+            _ => Roles::ADMIN,
+        }
+    }
+}
+
+// ==================================================================================================
+// User Functions
+// ==================================================================================================
 
 // Check if the principal exists in the vector
 #[update]
@@ -194,6 +253,7 @@ async fn createUser(fullname: String, email: String, role: String) -> Profile {
             principal_id,
             Profile {
                 id: f.to_string(),
+                principal_id: principal_id,
                 fullname,
                 email,
                 role: Roles::from_str(&role),
@@ -204,6 +264,7 @@ async fn createUser(fullname: String, email: String, role: String) -> Profile {
 
     Profile {
         id,
+        principal_id,
         fullname: m,
         email: e,
         role: Roles::from_str(&role),
@@ -290,6 +351,31 @@ fn search(text: String) -> ManualReply<Option<Profile>> {
         ManualReply::one(None::<Profile>)
     })
 }
+
+// Getting all freelancers
+#[query]
+fn getAllFreelancers() -> Vec<Profile> {
+    let mut freelancers = Vec::new();
+    let principal_id = ic_cdk::api::caller();
+    let mut m: Profile = Default::default();
+    PROFILE_STORE.with(|el| m = el.borrow().get(&principal_id).unwrap().clone());
+    assert!(m.role == Roles::EMPLOYER);
+
+    PROFILE_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        for profile in store_borrowed.values() {
+            if profile.role == Roles::ADMIN {
+                freelancers.push(profile.clone());
+            }
+        }
+    });
+
+    freelancers
+}
+
+// ==================================================================================================
+// Course related functions
+// ==================================================================================================
 
 // Create a new Course
 #[update]
@@ -386,6 +472,65 @@ fn applyCourse(id: String) -> Option<Course> {
 
     course_opt
 }
+
+// Check if the user has applied for the course
+#[query]
+fn checkAppliedCourse(course_id: String) -> bool {
+    let principal_id = ic_cdk::api::caller();
+
+    let result = COURSE_STORE.with(|store| {
+        store
+            .borrow()
+            .get(&course_id)
+            .map_or(false, |course| course.applicants.contains(&principal_id))
+    });
+
+    result
+}
+
+// Get registered courses for the user
+#[update]
+fn getCoursesRegisteredByUser() -> Vec<Course> {
+    let principal_id = ic_cdk::api::caller();
+    let mut registered_courses = Vec::new();
+
+    COURSE_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        for course in store_borrowed.values() {
+            if course.applicants.contains(&principal_id) {
+                registered_courses.push(course.clone());
+            }
+        }
+    });
+
+    registered_courses.reverse();
+
+    registered_courses
+}
+
+// Getting course registered students
+#[query]
+fn getCourseApplicants(course_id: String) -> Vec<Profile> {
+    let mut applicants = Vec::new();
+    COURSE_STORE.with(|store| {
+        let store_borrowed = store.borrow();
+        if let Some(course) = store_borrowed.get(&course_id) {
+            for applicant in &course.applicants {
+                if let Some(profile) = PROFILE_STORE
+                    .with(|profile_store| profile_store.borrow().get(applicant).cloned())
+                {
+                    applicants.push(profile);
+                }
+            }
+        }
+    });
+
+    applicants
+}
+
+// ==================================================================================================
+// Job related functions
+// ==================================================================================================
 
 #[update]
 fn applyJobs(id: String) -> Option<Jobs> {
@@ -492,21 +637,6 @@ fn checkAppliedJob(job_id: String) -> bool {
     result
 }
 
-// Check if the user has applied for the course
-#[query]
-fn checkAppliedCourse(course_id: String) -> bool {
-    let principal_id = ic_cdk::api::caller();
-
-    let result = COURSE_STORE.with(|store| {
-        store
-            .borrow()
-            .get(&course_id)
-            .map_or(false, |course| course.applicants.contains(&principal_id))
-    });
-
-    result
-}
-
 // Get job count for the user
 #[query]
 fn getJobsAppliedCount() -> u32 {
@@ -525,46 +655,6 @@ fn getJobsAppliedCount() -> u32 {
     jobs_applied_count
 }
 
-// Get registered courses for the user
-#[update]
-fn getCoursesRegisteredByUser() -> Vec<Course> {
-    let principal_id = ic_cdk::api::caller();
-    let mut registered_courses = Vec::new();
-
-    COURSE_STORE.with(|store| {
-        let store_borrowed = store.borrow();
-        for course in store_borrowed.values() {
-            if course.applicants.contains(&principal_id) {
-                registered_courses.push(course.clone());
-            }
-        }
-    });
-
-    registered_courses.reverse();
-
-    registered_courses
-}
-
-// Getting course registered students
-#[query]
-fn getCourseApplicants(course_id: String) -> Vec<Profile> {
-    let mut applicants = Vec::new();
-    COURSE_STORE.with(|store| {
-        let store_borrowed = store.borrow();
-        if let Some(course) = store_borrowed.get(&course_id) {
-            for applicant in &course.applicants {
-                if let Some(profile) = PROFILE_STORE.with(|profile_store| {
-                    profile_store.borrow().get(applicant).cloned()
-                }) {
-                    applicants.push(profile);
-                }
-            }
-        }
-    });
-
-    applicants
-}
-
 // Getting job applicants
 #[query]
 fn getJobApplicants(job_id: String) -> Vec<Profile> {
@@ -573,9 +663,9 @@ fn getJobApplicants(job_id: String) -> Vec<Profile> {
         let store_borrowed = store.borrow();
         if let Some(job) = store_borrowed.get(&job_id) {
             for applicant in &job.applicants {
-                if let Some(profile) = PROFILE_STORE.with(|profile_store| {
-                    profile_store.borrow().get(applicant).cloned()
-                }) {
+                if let Some(profile) = PROFILE_STORE
+                    .with(|profile_store| profile_store.borrow().get(applicant).cloned())
+                {
                     applicants.push(profile);
                 }
             }
@@ -585,45 +675,109 @@ fn getJobApplicants(job_id: String) -> Vec<Profile> {
     applicants
 }
 
-// Getting all freelancers
-#[query]
-fn getAllFreelancers() -> Vec<Profile> {
-    let mut freelancers = Vec::new();
-    let principal_id = ic_cdk::api::caller();
-    let mut m: Profile = Default::default();
-    PROFILE_STORE.with(|el| m = el.borrow().get(&principal_id).unwrap().clone());
-    assert!(m.role == Roles::EMPLOYER);
+// ==================================================================================================
+// NFT
+// ==================================================================================================
 
-    PROFILE_STORE.with(|store| {
-        let store_borrowed = store.borrow();
-        for profile in store_borrowed.values() {
-            if profile.role == Roles::ADMIN {
-                freelancers.push(profile.clone());
-            }
-        }
-    });
+// ======================
+//      QUERY  CALLS
+// ======================
 
-    freelancers
+// #[query]
+// async fn get_token_id(course_id: String) -> Nat {
+//     let principal_id = ic_cdk::api::caller();
+//     let token_ids = get_token_identifier(principal_id);
+//     // mapping the token_ids to find the id having the course_id
+//     let token_id = token_ids
+//         .into_iter()
+//         .find(|id| id.contains(&course_id))
+//         .cloned()
+//         .unwrap_or_default();
+//     Nat::from_str(&token_id).unwrap()
+// }
+
+// #[query]
+// fn get_user_nft_info(course_id: String) -> ManualReply<Result<TokenMetadata, NftError>> {
+//     let principal_id = ic_cdk::api::caller();
+//     let token_ids = PROFILE_STORE.with(|store| {
+//         store
+//             .borrow()
+//             .get(&principal_id)
+//             .map(|profile| profile.token_ids.clone())
+//             .unwrap_or_default()
+//     });
+//     // mapping the token_ids to find the id having the course_id
+//     let token_id = token_ids
+//         .iter()
+//         .find(|id| id.to_string().contains(&course_id))
+//         .cloned()
+//         .unwrap_or_default();
+//     get_token_metadata(token_id)
+// }
+
+// #[query]
+// fn get_owner_token_metadata() -> ManualReply<Result<Vec<TokenMetadata>, NftError>> {
+//     let principal_id = ic_cdk::api::caller();
+//     owner_token_metadata(principal_id)
+// }
+
+// #[query]
+// fn get_with_id(token: Nat) -> ManualReply<Result<TokenMetadata, NftError>> {
+//     get_token_metadata(token)
+// }
+
+// // ======================
+// //      UPDATE CALLS
+// // ======================
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn generate_unique_nat() -> Nat {
+    // Increment the counter safely
+    let counter_value = COUNTER.fetch_add(1, Ordering::SeqCst);
+    // Convert the counter value directly to Nat
+    Nat::from(counter_value)
 }
 
-// Role enum
-#[derive(CandidType, Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
-pub enum Roles {
-    FREELANCER,
-    #[default]
-    EMPLOYER,
-    TRAINER,
-    ADMIN,
-}
-impl Roles {
-    pub fn from_str(el: &str) -> Roles {
-        match el.to_lowercase().as_str() {
-            "trainee" => Roles::FREELANCER,
-            "employer" => Roles::EMPLOYER,
-            "trainer" => Roles::TRAINER,
-            _ => Roles::ADMIN,
-        }
-    }
+// Minting certificate to the students
+#[update]
+async fn mint_certificate(
+    to: String,
+    user_id: String,
+    description: String,
+    tag: String,
+    course_id: String,
+    certificate: String,
+) -> Result<Nat, NftError> {
+
+    let to = Principal::from_text(to).unwrap();
+
+    let token_identifier = generate_unique_nat();
+
+    // print the token Identifier
+    ic_cdk::api::print(format!("Token Identifier: {:?}", token_identifier));
+
+    // Assigning metadata values
+    let properties = vec![
+        (
+            "description".to_string(),
+            GenericValue::TextContent(description.to_string()),
+        ),
+        (
+            "tag".to_string(),
+            GenericValue::TextContent(tag.to_string()),
+        ),
+        (
+            "course_id".to_string(),
+            GenericValue::TextContent(course_id.to_string()),
+        ),
+        (
+            "certificate".to_string(),
+            GenericValue::BlobContent(certificate.to_string().into_bytes()),
+        ),
+    ];
+
+    mint(to, token_identifier, properties)
 }
 
 ic_cdk::export_candid!();

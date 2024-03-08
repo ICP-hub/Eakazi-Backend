@@ -1,18 +1,18 @@
 use cap_sdk::{handshake, insert_sync, DetailValue, IndefiniteEvent};
-use compile_time_run::run_command_str;
+
 use ic_cdk::api::call::ManualReply;
 use ic_cdk::api::{caller, canister_balance128, time, trap};
-use candid::{candid_method, CandidType, Deserialize, Int, Nat,Principal};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Not;
+
+use compile_time_run::run_command_str;
+use candid::{candid_method, CandidType, Deserialize, Int, Nat,Principal};
 use types::*;
 
-
-
-mod types {
+pub(crate) mod types {
     use super::*;
     #[derive(CandidType, Deserialize)]
     pub struct InitArgs {
@@ -97,7 +97,6 @@ mod types {
 
 mod ledger {
     use std::ops::{Add, AddAssign};
-
     use super::*;
     thread_local!(
         static LEDGER: RefCell<Ledger> = RefCell::new(Ledger::default());
@@ -716,9 +715,6 @@ fn dip721_burn(token_identifier: TokenIdentifier) -> Result<Nat, NftError> {
 }
 
 
-// #[pre_upgrade]
-
-
 #[cfg(any(target_arch = "wasm32", test))]
 fn main() {}
 
@@ -726,9 +722,10 @@ fn main() {}
 fn main() {
     std::print!("{}", export_candid());
 }
+
 #[update(name = "mint", guard = "is_canister_custodian")]
 #[candid_method(update, rename = "mint")]
-fn mint(
+pub fn mint(
     to: Principal,
     token_identifier: TokenIdentifier,
     properties: Vec<(String, GenericValue)>,
@@ -752,12 +749,29 @@ fn set_logo(logo: String) {
 fn set_symbol(symbol: String) {
     dip721_set_symbol(symbol)
 }
+
 #[update(name = "setCustodians", guard = "is_canister_custodian")]
 #[candid_method(update, rename = "setCustodians")]
 fn set_custodians(custodians: HashSet<Principal>) {
     dip721_set_custodians(custodians)
 }
 
+// #[query(name = "ownerTokenMetadata", manual_reply = true)]
+// #[candid_method(query, rename = "ownerTokenMetadata")]
+// pub fn get_token_identifier(owner: Principal) -> ManualReply<Result<Vec<TokenIdentifier>, NftError>> {
+//     dip721_owner_token_identifiers(owner)
+// }
+
+#[query(name = "tokenMetadata", manual_reply = true)]
+#[candid_method(query, rename = "tokenMetadata")]
+pub fn get_token_metadata(token_identifier: TokenIdentifier) -> ManualReply<Result<TokenMetadata, NftError>> {
+    dip721_token_metadata(token_identifier)
+}
+
+#[query]
+pub fn owner_token_metadata(owner: Principal) -> ManualReply<Result<Vec<TokenMetadata>, NftError>> {
+    dip721_owner_token_metadata(owner)
+}
 
 
 #[query()]
