@@ -1,24 +1,23 @@
 pub mod certificate;
 
-use candid::{candid_method, CandidType, Nat, Principal};
-use certificate::{
-    get_token_metadata, owner_token_metadata, types::{GenericValue, NftError, TokenIdentifier, TokenMetadata}
-};
+use crate::certificate::mint;
+use candid::{CandidType, Nat, Principal};
+use certificate::types::{GenericValue, NftError};
 use ic_cdk::api::call::ManualReply;
 use ic_cdk::api::management_canister::main::raw_rand;
 use ic_cdk_macros::*;
 use serde::{Deserialize, Serialize};
-use std::{borrow::{Borrow, BorrowMut}, cell::RefCell, sync::atomic::{AtomicU64, Ordering}};
-use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
-use crate::certificate::mint;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 type IdStore = BTreeMap<String, Principal>;
 type ProfileStore = BTreeMap<Principal, Profile>;
 type CourseStore = BTreeMap<String, Course>;
 type JobStore = BTreeMap<String, Jobs>;
-
 
 thread_local! {
     static CHECK_USER_STORE: RefCell<Vec<CheckUser>> = RefCell::default();
@@ -101,6 +100,14 @@ fn post_upgrade() {
 // Structs
 // ==================================================================================================
 
+#[derive(Clone, Debug, Default, CandidType, Deserialize)]
+struct Reviews{
+pub ratings : u8,// to be translated to stars in the app max of 5 ,min of 1
+pub reviewer : String,
+pub title : String,
+pub image : Vec<u8>,
+}
+
 #[derive(Clone, Debug, CandidType, Serialize, Deserialize)]
 struct Profile {
     pub id: String,
@@ -115,7 +122,7 @@ struct Profile {
     pub description: String,
     pub keywords: Vec<String>,
     pub skills: Vec<String>,
-    pub token_ids: Vec<Nat>,
+    pub token_ids: Vec<(Nat, String)>,
 }
 
 impl Default for Profile {
@@ -676,6 +683,31 @@ fn getJobApplicants(job_id: String) -> Vec<Profile> {
 }
 
 // ==================================================================================================
+// Rating and reviews
+// ==================================================================================================
+
+// #[update]
+// fn addReviews(ratings : u8  ,title: String, image : Option<Vec<u8>>,profile_reviewed : String){
+//  let mut profile = get(profile_reviewed);
+//  let  me = get_self();
+//  if let Some (el) = image {
+//     let r = Reviews{ ratings, reviewer:  me.fullname, title, image: el };
+//     profile.reviews.push(r);
+
+   
+//  }else {
+//     let r = Reviews{ ratings, reviewer: me.fullname, title, image : vec![0] };
+//     profile.reviews.push(r);
+//  }
+
+// }
+
+// #[update]
+// fn get_all_reviews() -> Vec<Reviews>{
+// get_self().reviews
+// }
+
+// ==================================================================================================
 // NFT
 // ==================================================================================================
 
@@ -683,48 +715,25 @@ fn getJobApplicants(job_id: String) -> Vec<Profile> {
 //      QUERY  CALLS
 // ======================
 
-// #[query]
-// async fn get_token_id(course_id: String) -> Nat {
-//     let principal_id = ic_cdk::api::caller();
-//     let token_ids = get_token_identifier(principal_id);
-//     // mapping the token_ids to find the id having the course_id
-//     let token_id = token_ids
-//         .into_iter()
-//         .find(|id| id.contains(&course_id))
-//         .cloned()
-//         .unwrap_or_default();
-//     Nat::from_str(&token_id).unwrap()
-// }
+// Get token_ids vec of tuples from the profile store
+#[query]
+fn get_token_id(course_id: String) -> Nat {
+    let principal_id = ic_cdk::api::caller();
 
-// #[query]
-// fn get_user_nft_info(course_id: String) -> ManualReply<Result<TokenMetadata, NftError>> {
-//     let principal_id = ic_cdk::api::caller();
-//     let token_ids = PROFILE_STORE.with(|store| {
-//         store
-//             .borrow()
-//             .get(&principal_id)
-//             .map(|profile| profile.token_ids.clone())
-//             .unwrap_or_default()
-//     });
-//     // mapping the token_ids to find the id having the course_id
-//     let token_id = token_ids
-//         .iter()
-//         .find(|id| id.to_string().contains(&course_id))
-//         .cloned()
-//         .unwrap_or_default();
-//     get_token_metadata(token_id)
-// }
-
-// #[query]
-// fn get_owner_token_metadata() -> ManualReply<Result<Vec<TokenMetadata>, NftError>> {
-//     let principal_id = ic_cdk::api::caller();
-//     owner_token_metadata(principal_id)
-// }
-
-// #[query]
-// fn get_with_id(token: Nat) -> ManualReply<Result<TokenMetadata, NftError>> {
-//     get_token_metadata(token)
-// }
+    // Retrieve the PROFILE_STORE and find the profile matching the caller's principal_id
+    let profile_store = PROFILE_STORE.with(|store| store.borrow().clone());
+    
+    if let Some(profile) = profile_store.values().find(|profile| profile.principal_id == principal_id) {
+        for (token_id, stored_course_id) in &profile.token_ids {
+            if course_id == *stored_course_id {
+                return token_id.clone();
+            }
+        }
+    }
+    
+    Nat::from(-1)
+}
+    
 
 // // ======================
 // //      UPDATE CALLS
@@ -749,13 +758,19 @@ async fn mint_certificate(
     course_id: String,
     certificate: String,
 ) -> Result<Nat, NftError> {
-
     let to = Principal::from_text(to).unwrap();
 
     let token_identifier = generate_unique_nat();
 
-    // print the token Identifier
-    ic_cdk::api::print(format!("Token Identifier: {:?}", token_identifier));
+    let token_id_tuple = (token_identifier.clone(), course_id.clone());
+
+    PROFILE_STORE.with(|store| {
+        if let Some(profile) = store.borrow_mut().get_mut(&to) { 
+            if !profile.token_ids.contains(&token_id_tuple) {
+                profile.token_ids.push(token_id_tuple);
+            }
+        }
+    });
 
     // Assigning metadata values
     let properties = vec![

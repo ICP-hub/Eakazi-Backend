@@ -532,7 +532,7 @@ fn dip721_operator_token_identifiers(
 
 #[query(manual_reply = true)]
 #[candid_method(query)]
-fn dip721_token_metadata(
+pub fn dip721_token_metadata(
     token_identifier: TokenIdentifier,
 ) -> ManualReply<Result<TokenMetadata, NftError>> {
     ledger::with(|ledger| ManualReply::one(ledger.token_metadata(&token_identifier)))
@@ -755,24 +755,6 @@ fn set_symbol(symbol: String) {
 fn set_custodians(custodians: HashSet<Principal>) {
     dip721_set_custodians(custodians)
 }
-
-// #[query(name = "ownerTokenMetadata", manual_reply = true)]
-// #[candid_method(query, rename = "ownerTokenMetadata")]
-// pub fn get_token_identifier(owner: Principal) -> ManualReply<Result<Vec<TokenIdentifier>, NftError>> {
-//     dip721_owner_token_identifiers(owner)
-// }
-
-#[query(name = "tokenMetadata", manual_reply = true)]
-#[candid_method(query, rename = "tokenMetadata")]
-pub fn get_token_metadata(token_identifier: TokenIdentifier) -> ManualReply<Result<TokenMetadata, NftError>> {
-    dip721_token_metadata(token_identifier)
-}
-
-#[query]
-pub fn owner_token_metadata(owner: Principal) -> ManualReply<Result<Vec<TokenMetadata>, NftError>> {
-    dip721_owner_token_metadata(owner)
-}
-
 
 #[query()]
 fn export_candid() -> String {

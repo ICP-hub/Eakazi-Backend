@@ -11,7 +11,7 @@ type Profile = record {
   organization : text;
   skills : vec text;
   location : text;
-  token_ids : vec nat;
+  token_ids : vec record {nat; text};
 };
 
 type Course = record {
@@ -162,6 +162,7 @@ service : (opt InitArgs) -> {
   getCoursesRegisteredByUser : () -> (vec Course);
   getCourseApplicants : (text) -> (vec Profile) query;
   //  NFT functions
+  get_token_id : (text) -> (nat) query;
   mint_certificate : (text, text, text, text, text, text) -> (Result);
   // certificate .rs
   approve : (principal, nat) -> (Result);
