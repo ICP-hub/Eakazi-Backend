@@ -223,7 +223,7 @@ impl Roles {
 
 // Check if the principal exists in the vector
 #[update]
-async fn checkUser() -> bool {
+async fn check_user() -> bool {
     let user = ic_cdk::api::caller();
     let exists = CHECK_USER_STORE.with(|check_user_store| {
         check_user_store
@@ -245,7 +245,7 @@ async fn checkUser() -> bool {
 
 // Create a new profile
 #[update]
-async fn createUser(fullname: String, email: String, role: String) -> Profile {
+async fn create_user(fullname: String, email: String, role: String) -> Profile {
     let principal_id = ic_cdk::api::caller();
 
     let uid = raw_rand().await.unwrap().0;
@@ -281,7 +281,7 @@ async fn createUser(fullname: String, email: String, role: String) -> Profile {
 
 // Get full name of the user
 #[query]
-fn getFullName() -> String {
+fn get_full_name() -> String {
     let principal_id = ic_cdk::api::caller();
     PROFILE_STORE.with(|profile_store| {
         profile_store
@@ -294,7 +294,7 @@ fn getFullName() -> String {
 
 // Get role of the user
 #[query]
-fn getRole() -> String {
+fn get_role() -> String {
     let principal_id = ic_cdk::api::caller();
     PROFILE_STORE.with(|profile_store| {
         profile_store
@@ -305,7 +305,7 @@ fn getRole() -> String {
     })
 }
 
-#[query(name = "getSelf")]
+#[query]
 fn get_self() -> Profile {
     let id = ic_cdk::api::caller();
     PROFILE_STORE.with(|profile_store| profile_store.borrow().get(&id).cloned().unwrap_or_default())
@@ -361,7 +361,7 @@ fn search(text: String) -> ManualReply<Option<Profile>> {
 
 // Getting all freelancers
 #[query]
-fn getAllFreelancers() -> Vec<Profile> {
+fn get_all_freelancers() -> Vec<Profile> {
     let mut freelancers = Vec::new();
     let principal_id = ic_cdk::api::caller();
     let mut m: Profile = Default::default();
@@ -386,7 +386,7 @@ fn getAllFreelancers() -> Vec<Profile> {
 
 // Create a new Course
 #[update]
-async fn createCourse(title: String) -> Course {
+async fn create_course(title: String) -> Course {
     let principal_id = ic_cdk::api::caller();
     let mut m: Profile = Default::default();
     PROFILE_STORE.with(|el| m = el.borrow().get(&principal_id).unwrap().clone());
@@ -422,7 +422,7 @@ async fn createCourse(title: String) -> Course {
 
 // Get all the courses by the creator
 #[update]
-fn getCoursesByCreator() -> Vec<Course> {
+fn get_courses_by_creator() -> Vec<Course> {
     let principal_id = ic_cdk::api::caller();
     let mut courses_by_creator = Vec::new();
 
@@ -442,13 +442,13 @@ fn getCoursesByCreator() -> Vec<Course> {
 
 // Get a specific course by id
 #[query]
-fn getCourse(id: String) -> Course {
+fn get_course(id: String) -> Course {
     COURSE_STORE.with(|el| el.borrow().get(&id).cloned().unwrap())
 }
 
 // Get all courses
 #[query]
-fn getAllCourses() -> Vec<Course> {
+fn get_all_courses() -> Vec<Course> {
     let mut courses = Vec::new();
     COURSE_STORE.with(|store| {
         let store_borrowed = store.borrow();
@@ -463,7 +463,7 @@ fn getAllCourses() -> Vec<Course> {
 }
 
 #[update]
-fn applyCourse(id: String) -> Option<Course> {
+fn apply_course(id: String) -> Option<Course> {
     let principal_id = ic_cdk::api::caller();
     let mut course_opt = None;
 
@@ -482,7 +482,7 @@ fn applyCourse(id: String) -> Option<Course> {
 
 // Check if the user has applied for the course
 #[query]
-fn checkAppliedCourse(course_id: String) -> bool {
+fn check_applied_course(course_id: String) -> bool {
     let principal_id = ic_cdk::api::caller();
 
     let result = COURSE_STORE.with(|store| {
@@ -497,7 +497,7 @@ fn checkAppliedCourse(course_id: String) -> bool {
 
 // Get registered courses for the user
 #[update]
-fn getCoursesRegisteredByUser() -> Vec<Course> {
+fn get_courses_registered_by_user() -> Vec<Course> {
     let principal_id = ic_cdk::api::caller();
     let mut registered_courses = Vec::new();
 
@@ -517,7 +517,7 @@ fn getCoursesRegisteredByUser() -> Vec<Course> {
 
 // Getting course registered students
 #[query]
-fn getCourseApplicants(course_id: String) -> Vec<Profile> {
+fn get_course_applicants(course_id: String) -> Vec<Profile> {
     let mut applicants = Vec::new();
     COURSE_STORE.with(|store| {
         let store_borrowed = store.borrow();
@@ -540,7 +540,7 @@ fn getCourseApplicants(course_id: String) -> Vec<Profile> {
 // ==================================================================================================
 
 #[update]
-fn applyJobs(id: String) -> Option<Jobs> {
+fn apply_jobs(id: String) -> Option<Jobs> {
     let principal_id = ic_cdk::api::caller();
     let mut job_opt = None;
 
@@ -559,7 +559,7 @@ fn applyJobs(id: String) -> Option<Jobs> {
 
 // Create a new Job
 #[update]
-async fn createJob(title: String) -> Jobs {
+async fn create_job(title: String) -> Jobs {
     let principal_id = ic_cdk::api::caller();
     let mut m: Profile = Default::default();
     PROFILE_STORE.with(|el| m = el.borrow().get(&principal_id).unwrap().clone());
@@ -595,7 +595,7 @@ async fn createJob(title: String) -> Jobs {
 
 // Get all jobs
 #[query]
-fn getAllJobs() -> Vec<Jobs> {
+fn get_all_jobs() -> Vec<Jobs> {
     let mut jobs = Vec::new();
     JOB_STORE.with(|store| {
         let store_borrowed = store.borrow();
@@ -611,7 +611,7 @@ fn getAllJobs() -> Vec<Jobs> {
 
 // Get all jobs by the creator
 #[update]
-fn getJobsByCreator() -> Vec<Jobs> {
+fn get_jobs_by_creator() -> Vec<Jobs> {
     let principal_id = ic_cdk::api::caller();
     let mut jobs_by_creator = Vec::new();
 
@@ -631,7 +631,7 @@ fn getJobsByCreator() -> Vec<Jobs> {
 
 // Check if the user has applied for the job
 #[query]
-fn checkAppliedJob(job_id: String) -> bool {
+fn check_applied_job(job_id: String) -> bool {
     let principal_id = ic_cdk::api::caller();
 
     let result = JOB_STORE.with(|store| {
@@ -646,7 +646,7 @@ fn checkAppliedJob(job_id: String) -> bool {
 
 // Get job count for the user
 #[query]
-fn getJobsAppliedCount() -> u32 {
+fn get_jobs_applied_count() -> u32 {
     let principal_id = ic_cdk::api::caller();
     let mut jobs_applied_count = 0;
 
@@ -664,7 +664,7 @@ fn getJobsAppliedCount() -> u32 {
 
 // Getting job applicants
 #[query]
-fn getJobApplicants(job_id: String) -> Vec<Profile> {
+fn get_job_applicants(job_id: String) -> Vec<Profile> {
     let mut applicants = Vec::new();
     JOB_STORE.with(|store| {
         let store_borrowed = store.borrow();
@@ -711,30 +711,6 @@ fn getJobApplicants(job_id: String) -> Vec<Profile> {
 // NFT
 // ==================================================================================================
 
-// ======================
-//      QUERY  CALLS
-// ======================
-
-// Get token_ids vec of tuples from the profile store
-#[query]
-fn get_token_id(course_id: String) -> Nat {
-    let principal_id = ic_cdk::api::caller();
-
-    // Retrieve the PROFILE_STORE and find the profile matching the caller's principal_id
-    let profile_store = PROFILE_STORE.with(|store| store.borrow().clone());
-    
-    if let Some(profile) = profile_store.values().find(|profile| profile.principal_id == principal_id) {
-        for (token_id, stored_course_id) in &profile.token_ids {
-            if course_id == *stored_course_id {
-                return token_id.clone();
-            }
-        }
-    }
-    
-    Nat::from(-1)
-}
-    
-
 // // ======================
 // //      UPDATE CALLS
 // // ======================
@@ -752,7 +728,6 @@ fn generate_unique_nat() -> Nat {
 #[update]
 async fn mint_certificate(
     to: String,
-    user_id: String,
     description: String,
     tag: String,
     course_id: String,
@@ -788,7 +763,7 @@ async fn mint_certificate(
         ),
         (
             "certificate".to_string(),
-            GenericValue::BlobContent(certificate.to_string().into_bytes()),
+            GenericValue::TextContent(certificate.to_string()),
         ),
     ];
 
