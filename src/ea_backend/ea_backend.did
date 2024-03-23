@@ -1,3 +1,13 @@
+type Reviews = record {
+  ratings : float64;
+  title : text;
+  review : text;
+  image : opt text;
+  reviewer : text;
+  review_time : int64;
+  reviewer_principal : opt principal;
+};
+
 type Profile = record {
   id : text;
   principal_id : principal;
@@ -11,7 +21,8 @@ type Profile = record {
   organization : text;
   skills : vec text;
   location : text;
-  token_ids : vec record {nat; text};
+  token_ids : vec record { nat; text };
+  reviews : vec Reviews;
 };
 
 type Course = record {
@@ -148,6 +159,11 @@ service : (opt InitArgs) -> {
   check_applied_course : (text) -> (bool) query;
   get_courses_registered_by_user : () -> (vec Course);
   get_course_applicants : (text) -> (vec Profile) query;
+  // Review functions
+  add_reviews : (float64, text, text, text, text, int64) -> (Reviews);
+  get_all_reviews : (principal) -> (vec Reviews);
+  confirm_reviewer : (text) -> (bool) query;
+  confirm_reviewed : (principal) -> (bool) query;
   //  NFT functions
   mint_certificate : (text, text, text, text, text) -> (Result);
   // certificate .rs

@@ -18,6 +18,7 @@ type IdStore = BTreeMap<String, Principal>;
 type ProfileStore = BTreeMap<Principal, Profile>;
 type CourseStore = BTreeMap<String, Course>;
 type JobStore = BTreeMap<String, Jobs>;
+type ReviewStore = BTreeMap<String, Reviews>;
 
 thread_local! {
     static CHECK_USER_STORE: RefCell<Vec<CheckUser>> = RefCell::default();
@@ -25,6 +26,7 @@ thread_local! {
     static ID_STORE: RefCell<IdStore> = RefCell::default();
     static COURSE_STORE : RefCell<CourseStore> = RefCell::default();
     static JOB_STORE : RefCell<JobStore> = RefCell::default();
+    static REVIEW_STORE: RefCell<ReviewStore> = RefCell::default();
 }
 
 // ==================================================================================================
@@ -48,6 +50,9 @@ fn pre_upgrade() {
             .expect("Failed to serialize course_store");
     let serialized_job_store = serde_cbor::to_vec(&JOB_STORE.with(|store| store.borrow().clone()))
         .expect("Failed to serialize job_store");
+    let serialized_review_store =
+        serde_cbor::to_vec(&REVIEW_STORE.with(|store| store.borrow().clone()))
+            .expect("Failed to serialize review_store");
 
     // Saving the serialized data to stable storage
     ic_cdk::storage::stable_save((
@@ -56,6 +61,7 @@ fn pre_upgrade() {
         serialized_id_store,
         serialized_course_store,
         serialized_job_store,
+        serialized_review_store,
     ))
     .expect("Failed to save to stable storage");
 }
@@ -69,13 +75,15 @@ fn post_upgrade() {
         serialized_id_store,
         serialized_course_store,
         serialized_job_store,
-    ): (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) = match ic_cdk::storage::stable_restore() {
-        Ok(data) => data,
-        Err(e) => {
-            ic_cdk::api::print(format!("Failed to restore from stable storage: {:?}", e));
-            return;
-        }
-    };
+        serialized_review_store,
+    ): (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) =
+        match ic_cdk::storage::stable_restore() {
+            Ok(data) => data,
+            Err(e) => {
+                ic_cdk::api::print(format!("Failed to restore from stable storage: {:?}", e));
+                return;
+            }
+        };
 
     // Deserializing the data and populating the stores
     let check_user_store: Vec<CheckUser> =
@@ -88,24 +96,44 @@ fn post_upgrade() {
         serde_cbor::from_slice(&serialized_course_store).unwrap_or_else(|_| BTreeMap::new());
     let job_store: JobStore =
         serde_cbor::from_slice(&serialized_job_store).unwrap_or_else(|_| BTreeMap::new());
+    let review_store: ReviewStore =
+        serde_cbor::from_slice(&serialized_review_store).unwrap_or_else(|_| BTreeMap::new());
 
     CHECK_USER_STORE.with(|store| *store.borrow_mut() = check_user_store);
     PROFILE_STORE.with(|store| *store.borrow_mut() = profile_store);
     ID_STORE.with(|store| *store.borrow_mut() = id_store);
     COURSE_STORE.with(|store| *store.borrow_mut() = course_store);
     JOB_STORE.with(|store| *store.borrow_mut() = job_store);
+    REVIEW_STORE.with(|store| *store.borrow_mut() = review_store);
 }
 
 // ==================================================================================================
 // Structs
 // ==================================================================================================
 
-#[derive(Clone, Debug, Default, CandidType, Deserialize)]
-struct Reviews{
-pub ratings : u8,// to be translated to stars in the app max of 5 ,min of 1
-pub reviewer : String,
-pub title : String,
-pub image : Vec<u8>,
+#[derive(Clone, Debug, CandidType, Serialize, Deserialize)]
+struct Reviews {
+    pub ratings: f64,
+    pub title: String,
+    pub review: String,
+    pub image: Option<String>,
+    pub reviewer: String,
+    pub review_time: i64,
+    pub reviewer_principal: Option<Principal>,
+}
+
+impl Default for Reviews {
+    fn default() -> Self {
+        Self {
+            ratings: Default::default(),
+            title: Default::default(),
+            review: Default::default(),
+            image: Default::default(),
+            reviewer: Default::default(),
+            review_time: Default::default(),
+            reviewer_principal: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, CandidType, Serialize, Deserialize)]
@@ -123,6 +151,7 @@ struct Profile {
     pub keywords: Vec<String>,
     pub skills: Vec<String>,
     pub token_ids: Vec<(Nat, String)>,
+    pub reviews: Vec<Reviews>,
 }
 
 impl Default for Profile {
@@ -141,6 +170,7 @@ impl Default for Profile {
             keywords: Default::default(),
             skills: Default::default(),
             token_ids: Default::default(),
+            reviews: Default::default(),
         }
     }
 }
@@ -305,12 +335,14 @@ fn get_role() -> String {
     })
 }
 
+// Getting user profile from caller
 #[query]
 fn get_self() -> Profile {
     let id = ic_cdk::api::caller();
     PROFILE_STORE.with(|profile_store| profile_store.borrow().get(&id).cloned().unwrap_or_default())
 }
 
+// Getting user profile from user id
 #[query]
 fn get(uid: String) -> Profile {
     ID_STORE.with(|id_store| {
@@ -324,6 +356,7 @@ fn get(uid: String) -> Profile {
     })
 }
 
+// updating
 #[update]
 fn update(profile: Profile) {
     let principal_id = ic_cdk::api::caller();
@@ -338,6 +371,7 @@ fn update(profile: Profile) {
     });
 }
 
+// Searching
 #[query(manual_reply = true)]
 fn search(text: String) -> ManualReply<Option<Profile>> {
     let text = text.to_lowercase();
@@ -394,7 +428,7 @@ async fn create_course(title: String) -> Course {
     let uid = raw_rand().await.unwrap().0;
     let uid = format!("{:x}", Sha256::digest(&uid));
 
-    let c = title.clone();
+    // let c = title.clone();
     let d = uid.clone();
     let e = uid.clone();
 
@@ -462,6 +496,7 @@ fn get_all_courses() -> Vec<Course> {
     courses
 }
 
+// Applying for a new course
 #[update]
 fn apply_course(id: String) -> Option<Course> {
     let principal_id = ic_cdk::api::caller();
@@ -567,7 +602,7 @@ async fn create_job(title: String) -> Jobs {
     let uid = raw_rand().await.unwrap().0;
     let uid = format!("{:x}", Sha256::digest(&uid));
 
-    let c = title.clone();
+    // let c = title.clone();
     let d = uid.clone();
     let e = uid.clone();
 
@@ -686,26 +721,116 @@ fn get_job_applicants(job_id: String) -> Vec<Profile> {
 // Rating and reviews
 // ==================================================================================================
 
-// #[update]
-// fn addReviews(ratings : u8  ,title: String, image : Option<Vec<u8>>,profile_reviewed : String){
-//  let mut profile = get(profile_reviewed);
-//  let  me = get_self();
-//  if let Some (el) = image {
-//     let r = Reviews{ ratings, reviewer:  me.fullname, title, image: el };
-//     profile.reviews.push(r);
+// // ======================
+// //      QUERY CALLS
+// // ======================
 
-   
-//  }else {
-//     let r = Reviews{ ratings, reviewer: me.fullname, title, image : vec![0] };
-//     profile.reviews.push(r);
-//  }
+// Confirming reviewer account
+#[query]
+fn confirm_reviewer(reviewee: String) -> bool {
+    let reviewer = ic_cdk::api::caller();
+    let reviewer_principal_string = Principal::to_text(&reviewer);
 
-// }
+    if reviewee == reviewer_principal_string {
+        return true;
+    } else {
+        return false;
+    }
+}
 
-// #[update]
-// fn get_all_reviews() -> Vec<Reviews>{
-// get_self().reviews
-// }
+// Confirming if user has already reviewed or not
+#[query]
+fn confirm_reviewed(reviewee_principal : Principal) -> bool {
+
+    let reviewer_principal = ic_cdk::api::caller();
+
+    let profile = PROFILE_STORE.with(|store| {
+        store.borrow().get(&reviewee_principal).cloned()
+    });
+
+    if let Some(profile) = profile {
+        for review in profile.reviews.iter() {
+            if let Some(reviewer) = &review.reviewer_principal {
+                if reviewer == &reviewer_principal {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+
+// // ======================
+// //      UPDATE CALLS
+// // ======================
+
+// fetching all reviews
+#[query]
+fn get_all_reviews(principal : Principal) -> Vec<Reviews> {
+
+    let mut n: Profile = Default::default();
+    PROFILE_STORE.with(|el| n = el.borrow().get(&principal).unwrap().clone());
+
+    n.reviews
+}
+
+// creating a new review
+#[update]
+async fn add_reviews(
+    new_ratings: f64,
+    new_title: String,
+    new_review: String,
+    new_image: String,
+    profile_reviewed: String,
+    new_review_time: i64,
+) -> Reviews {
+
+    // Getting the reviewer principal and fetching the full name
+    let reviewer_principal = ic_cdk::api::caller();
+    let mut n: Profile = Default::default();
+    PROFILE_STORE.with(|el| n = el.borrow().get(&reviewer_principal).unwrap().clone());
+    let reviewer_full_name = n.fullname;
+
+    // Handling image option
+    let image_option = if new_image.is_empty() {
+        None
+    } else {
+        Some(new_image)
+    };
+
+    // Creating unique id for a review
+    let uid = raw_rand().await.unwrap().0;
+    let uid = format!("{:x}", Sha256::digest(&uid));
+
+    // Creating the new review object
+    let new_review = Reviews {
+        ratings: new_ratings,
+        title: new_title.to_string(),
+        review: new_review.to_string(),
+        image: image_option.clone(),
+        reviewer: reviewer_full_name.clone(),
+        review_time: new_review_time,
+        reviewer_principal: Some(reviewer_principal),
+    };
+
+    // Updating the review store with the new review
+    REVIEW_STORE.with(|el| {
+        el.borrow_mut().insert(uid.clone(), new_review.clone());
+    });
+
+    // Retrieving the reviewee profile and updating the profile store with the new review
+    let mut reviewee_profile = get(profile_reviewed.clone());
+    reviewee_profile.reviews.push(new_review.clone());
+    PROFILE_STORE.with(|profile_store| {
+        let id_store = ID_STORE.with(|id_store| id_store.borrow().clone());
+        if let Some(reviewee_principal) = id_store.get(&profile_reviewed) {
+            profile_store.borrow_mut().insert(reviewee_principal.clone(), reviewee_profile);
+        }
+    });
+
+    new_review
+}
 
 // ==================================================================================================
 // NFT
@@ -740,7 +865,7 @@ async fn mint_certificate(
     let token_id_tuple = (token_identifier.clone(), course_id.clone());
 
     PROFILE_STORE.with(|store| {
-        if let Some(profile) = store.borrow_mut().get_mut(&to) { 
+        if let Some(profile) = store.borrow_mut().get_mut(&to) {
             if !profile.token_ids.contains(&token_id_tuple) {
                 profile.token_ids.push(token_id_tuple);
             }
