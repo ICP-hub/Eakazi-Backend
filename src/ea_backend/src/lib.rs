@@ -53,6 +53,9 @@ fn pre_upgrade() {
     let serialized_review_store =
         serde_cbor::to_vec(&REVIEW_STORE.with(|store| store.borrow().clone()))
             .expect("Failed to serialize review_store");
+        let serialized_ledger =
+        serde_cbor::to_vec(&certificate::ledger::LEDGER.with(|store| store.borrow().clone()))
+            .expect("Failed to serialize review_store");
 
     // Saving the serialized data to stable storage
     ic_cdk::storage::stable_save((
@@ -62,6 +65,7 @@ fn pre_upgrade() {
         serialized_course_store,
         serialized_job_store,
         serialized_review_store,
+        serialized_ledger
     ))
     .expect("Failed to save to stable storage");
 }
@@ -76,7 +80,8 @@ fn post_upgrade() {
         serialized_course_store,
         serialized_job_store,
         serialized_review_store,
-    ): (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) =
+        serialized_ledger,
+    ): (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) =
         match ic_cdk::storage::stable_restore() {
             Ok(data) => data,
             Err(e) => {
@@ -98,6 +103,8 @@ fn post_upgrade() {
         serde_cbor::from_slice(&serialized_job_store).unwrap_or_else(|_| BTreeMap::new());
     let review_store: ReviewStore =
         serde_cbor::from_slice(&serialized_review_store).unwrap_or_else(|_| BTreeMap::new());
+    let ledger_store: certificate::ledger::Ledger =
+                serde_cbor::from_slice(&serialized_ledger).unwrap_or_else(|_| Default::default());
 
     CHECK_USER_STORE.with(|store| *store.borrow_mut() = check_user_store);
     PROFILE_STORE.with(|store| *store.borrow_mut() = profile_store);
@@ -105,6 +112,7 @@ fn post_upgrade() {
     COURSE_STORE.with(|store| *store.borrow_mut() = course_store);
     JOB_STORE.with(|store| *store.borrow_mut() = job_store);
     REVIEW_STORE.with(|store| *store.borrow_mut() = review_store);
+    certificate::ledger::LEDGER.with(|store| *store.borrow_mut() = ledger_store);
 }
 
 // ==================================================================================================

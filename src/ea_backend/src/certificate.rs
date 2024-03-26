@@ -1,19 +1,20 @@
-use cap_sdk::{handshake, insert_sync, DetailValue, IndefiniteEvent};
+use cap_sdk::handshake;
 
 use ic_cdk::api::call::ManualReply;
-use ic_cdk::api::{caller, canister_balance128, time, trap};
-use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
+use ic_cdk::api::{caller, canister_balance128, time};
+use ic_cdk_macros::{init, query, update};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Not;
 
+use candid::{candid_method, CandidType, Deserialize, Int, Nat, Principal};
 use compile_time_run::run_command_str;
-use candid::{candid_method, CandidType, Deserialize, Int, Nat,Principal};
 use types::*;
 
 pub(crate) mod types {
     use super::*;
+    use serde::{Serialize, Deserialize};
     #[derive(CandidType, Deserialize)]
     pub struct InitArgs {
         pub name: Option<String>,
@@ -22,7 +23,7 @@ pub(crate) mod types {
         pub custodians: Option<HashSet<Principal>>,
         pub cap: Option<Principal>,
     }
-    #[derive(CandidType, Default, Deserialize)]
+    #[derive(CandidType, Default,Serialize, Deserialize, Clone)]
     pub struct Metadata {
         pub name: Option<String>,
         pub logo: Option<String>,
@@ -39,7 +40,7 @@ pub(crate) mod types {
         pub total_unique_holders: Nat,
     }
     pub type TokenIdentifier = Nat;
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType,Serialize, Deserialize, Clone)]
     pub enum GenericValue {
         BoolContent(bool),
         TextContent(String),
@@ -55,11 +56,11 @@ pub(crate) mod types {
         Int32Content(i32),
         Int64Content(i64),
         IntContent(Int),
-        FloatContent(f64), 
+        FloatContent(f64),
         NestedContent(Vec<(String, GenericValue)>),
     }
-   
-    #[derive(CandidType, Deserialize)]
+
+    #[derive(CandidType, Serialize, Deserialize, Clone)]
     pub struct TokenMetadata {
         pub token_identifier: TokenIdentifier,
         pub owner: Option<Principal>,
@@ -91,15 +92,15 @@ pub(crate) mod types {
         ExistedNFT,
         SelfApprove,
         SelfTransfer,
-        
     }
 }
 
-mod ledger {
-    use std::ops::{Add, AddAssign};
+pub mod ledger {
     use super::*;
+    use serde::{Serialize, Deserialize};
+
     thread_local!(
-        static LEDGER: RefCell<Ledger> = RefCell::new(Ledger::default());
+      pub static LEDGER: RefCell<Ledger> = RefCell::new(Ledger::default());
     );
 
     pub fn with<T, F: FnOnce(&Ledger) -> T>(f: F) -> T {
@@ -110,7 +111,7 @@ mod ledger {
         LEDGER.with(|ledger| f(&mut ledger.borrow_mut()))
     }
 
-    #[derive(CandidType, Default, Deserialize)]
+    #[derive(CandidType, Default, Serialize, Deserialize, Clone)]
     pub struct Ledger {
         pub metadata: Metadata,
         pub tokens: HashMap<TokenIdentifier, TokenMetadata>, // recommend to have sequential id
@@ -132,8 +133,6 @@ mod ledger {
                         metadata.custodians.insert(custodians);
                     }
                 }
-
-               
             } else {
                 // default to mainnet cap canister if no args are specified
                 handshake(1_000_000_000_000, None);
@@ -467,8 +466,6 @@ fn dip721_stats() -> Stats {
     }
 }
 
-
-
 // ==================================================================================================
 // balance
 // ==================================================================================================
@@ -529,7 +526,6 @@ fn dip721_operator_token_identifiers(
     ledger::with(|ledger| ManualReply::one(ledger.operator_token_identifiers(&operator)))
 }
 
-
 #[query(manual_reply = true)]
 #[candid_method(query)]
 pub fn dip721_token_metadata(
@@ -537,7 +533,6 @@ pub fn dip721_token_metadata(
 ) -> ManualReply<Result<TokenMetadata, NftError>> {
     ledger::with(|ledger| ManualReply::one(ledger.token_metadata(&token_identifier)))
 }
-
 
 #[query()]
 #[candid_method(query)]
@@ -552,7 +547,6 @@ fn dip721_is_approved_for_all(owner: Principal, operator: Principal) -> Result<b
             })
     })
 }
-
 
 #[update]
 #[candid_method(update)]
@@ -576,11 +570,9 @@ fn dip721_approve(operator: Principal, token_identifier: TokenIdentifier) -> Res
         );
         ledger.approve(caller, &token_identifier, Some(operator));
 
-       
-    Ok(ledger.inc_tx())
-})
+        Ok(ledger.inc_tx())
+    })
 }
-
 
 #[update]
 #[candid_method(update)]
@@ -598,7 +590,6 @@ fn dip721_set_approval_for_all(operator: Principal, is_approved: bool) -> Result
             ledger.update_operator_cache(&token_identifier, old_operator, new_operator);
             ledger.approve(caller, &token_identifier, new_operator);
         }
-
 
         Ok(ledger.inc_tx())
     })
@@ -620,9 +611,7 @@ fn dip721_transfer(to: Principal, token_identifier: TokenIdentifier) -> Result<N
         ledger.update_operator_cache(&token_identifier, old_operator, None);
         ledger.transfer(caller, &token_identifier, Some(to));
 
-      
-
-        Ok(ledger.inc_tx() )
+        Ok(ledger.inc_tx())
     })
 }
 
@@ -649,8 +638,6 @@ fn dip721_transfer_from(
         ledger.update_owner_cache(&token_identifier, old_owner, Some(to));
         ledger.update_operator_cache(&token_identifier, old_operator, None);
         ledger.transfer(caller, &token_identifier, Some(to));
-
-      
 
         Ok(ledger.inc_tx())
     })
@@ -688,7 +675,6 @@ fn dip721_mint(
                 burned_by: None,
             },
         );
-       
 
         Ok(ledger.inc_tx())
     })
@@ -709,11 +695,9 @@ fn dip721_burn(token_identifier: TokenIdentifier) -> Result<Nat, NftError> {
         ledger.update_operator_cache(&token_identifier, old_operator, None);
         ledger.burn(caller, &token_identifier);
 
-       
         Ok(ledger.inc_tx())
     })
 }
-
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn main() {}
